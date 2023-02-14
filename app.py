@@ -46,6 +46,7 @@ clear - clear the console
                 print('Table not found')
         elif splitted_command[0] == 'adduser':
             username = splitted_command[1]
+            
             password = splitted_command[2]
             users_tbl.add({'username': username, 'password': password})
             print('User added')
