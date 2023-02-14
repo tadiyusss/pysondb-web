@@ -14,13 +14,12 @@ else:
     debug = False
 
 app = Flask(__name__)
-users_tbl = getDb('system/users.json')
+users_tbl = getDb('data/users.json')
 
 def console():
     while True:
         command = input('>>> ')
         splitted_command = command.split(' ')
-        print(splitted_command)
         if command == 'help':
             print(''' 
 help - show this message
@@ -46,9 +45,10 @@ clear - clear the console
             else:
                 print('Table not found')
         elif splitted_command[0] == 'adduser':
-            username = str(input('Username: '))
-            password = str(input('Password: '))
+            username = splitted_command[1]
+            password = splitted_command[2]
             users_tbl.add({'username': username, 'password': password})
+            print('User added')
         else:
             print('Command not found')
 
@@ -56,7 +56,7 @@ console = threading.Thread(target=console)
 console.start()
 
 @app.errorhandler(404)
-def page_not_found():
+def page_not_found(e):
     return {
         'status': 'error',
         'message': 'Page not found'
@@ -67,12 +67,18 @@ def search():
     tbl_name = request.form.get('tbl_name')
     search_query = request.form.get('search_query')
     
+    if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
+        return {
+            'status': 'error',
+            'message': 'Invalid username or password'
+        }
+
     if os.path.isfile(f'tables/{tbl_name}.json'):
         table = getDb(f'tables/{tbl_name}.json')
         if search_query == 'all':
             data = table.getAll()
         else:
-            data = table.getBy(search_query)
+            data = table.getByQuery(search_query)
         return {
             'status': 'success',
             'tbl_name': tbl_name,
@@ -88,6 +94,12 @@ def search():
 def insert():
     tbl_name = request.form.get('tbl_name')
     insert_data = request.form.get('data')
+    
+    if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
+        return {
+            'status': 'error',
+            'message': 'Invalid username or password'
+        }
 
     if os.path.isfile(f'tables/{tbl_name}.json'):
         table = getDb(f'tables/{tbl_name}.json')
@@ -104,6 +116,12 @@ def insert():
 def drop():
     tbl_name = request.form.get('tbl_name')
     
+    if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
+        return {
+            'status': 'error',
+            'message': 'Invalid username or password'
+        }
+
     if os.path.isfile(f'tables/{tbl_name}.json'):
         os.remove(f'tables/{tbl_name}.json')
         return jsonify({'status':'success','tbl_name':tbl_name})
@@ -114,6 +132,12 @@ def drop():
 def create():
     tbl_name = request.form.get('tbl_name')
     
+    if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
+        return {
+            'status': 'error',
+            'message': 'Invalid username or password'
+        }
+
     if os.path.isfile(f'tables/{tbl_name}.json'):
         return {
             'status': 'error',
