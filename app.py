@@ -4,6 +4,7 @@
 
 from pysondb import getDb
 from flask import Flask, request, jsonify
+from tabulate import tabulate
 import threading
 import os 
 import sys
@@ -23,6 +24,7 @@ def console():
         if command == 'help':
             print(''' 
 help - show this message
+list - list all tables
 create <tbl_name> - create a table
 drop <tbl_name> - drop a table
 insert <tbl_name> <data> - insert data to a table
@@ -59,6 +61,10 @@ clear - clear the console
                 users_tbl.deleteById(users_tbl.getByQuery({'username': username})[0]['id'])
             else:
                 print('User not found')
+        elif splitted_command[0] == 'list':
+            tables = os.listdir('tables')
+            for table in tables:
+                print(table)
         else:
             print('Invalid command. Type "help" to see all commands')
 
@@ -129,4 +135,4 @@ def create():
         return jsonify({'status':'success','tbl_name':tbl_name})
     
     
-app.run(port=3363, debug=debug)
+app.run(host='0.0.0.0', port=3363, debug=debug)
