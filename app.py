@@ -1,3 +1,4 @@
+# TODO - Create list command for post client
 # TODO - Add user encryption
 # TODO - Add user authentication
 # TODO - Add database encryption
