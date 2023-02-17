@@ -6,9 +6,11 @@
 from pysondb import getDb
 from flask import Flask, request, jsonify
 from tabulate import tabulate
+import ast
 import threading
 import os 
 import sys
+import re
 
 if '-d' in sys.argv:
     debug = True
@@ -25,28 +27,43 @@ def console():
         try:
             if command == 'help':
                 print(''' 
-    help - show this message
-    list - list all tables
-    create <tbl_name> - create a table
-    drop <tbl_name> - drop a table
-    insert <tbl_name> <data> - insert data to a table
-    search <tbl_name> <search_query> - search data in a table (use "*" to get all data)
-    adduser <username> <password> - add a user to the database
-    deluser <username> - delete a user from the database
-    clear - clear the console
-    ''')    
-            elif splitted_command[0] == 'insert':
+help - show this message
+list - list all tables
+create - <tbl_name> - create a table
+drop - <tbl_name> - drop a table
+insert - <tbl_name> <data> - insert data to a table
+search - <tbl_name> <search_query> - search data in a table (use "*" to get all data)
+adduser - <username> <password> - add a user to the database
+deluser - <username> - delete a user from the database
+update - <tbl_name> <search_query> <update_data> - update data in a table
+clear - clear the console
+''')        
+            elif splitted_command[0] == 'update':
                 tbl_name = splitted_command[1]
-                insert_data = splitted_command[2]
+                search_query = re.findall(r'{.*?}', command)[0]
+                update_data = re.findall(r'{.*?}', command)[1]
                 if os.path.isfile(f'tables/{tbl_name}.json'):
                     table = getDb(f'tables/{tbl_name}.json')
-                    table.add(insert_data)
+                    rows = table.getByQuery(ast.literal_eval(search_query))
+                    table.updateByQuery(ast.literal_eval(search_query), ast.literal_eval(update_data))
+                    print('Data updated, {} rows updated'.format(len(rows)))
+                else:
+                    print('Table not found')
+            elif splitted_command[0] == 'insert':
+                tbl_name = splitted_command[1]
+                insert_data = re.findall(r'{.*?}', command)[0]
+                if os.path.isfile(f'tables/{tbl_name}.json'):
+                    table = getDb(f'tables/{tbl_name}.json')
+                    table.add(ast.literal_eval(insert_data))
                     print('Data inserted')
                 else:
                     print('Table not found')
 
             elif command == 'clear':
-                os.system('clear')
+                if os.name == 'nt':
+                    os.system('cls')
+                else:
+                    os.system('clear')
             elif splitted_command[0] == 'create':
                 if os.path.isfile(f'tables/{splitted_command[1]}.json'):
                     print('Table already exists')
@@ -93,6 +110,8 @@ def console():
                     print('Table not found')
             else:
                 print('Invalid command. Type "help" to see all commands')
+        except IndexError:
+            print('Invalid command. Type "help" to see all commands')
         except Exception as e:
             print(e)
 console = threading.Thread(target=console)
@@ -102,6 +121,29 @@ console.start()
 def page_not_found(e):
     return jsonify({'status': 'error','message': 'Page not found'})
 
+@app.route('/update', methods=["POST"])
+def update():
+    tbl_name = request.form.get('tbl_name')
+    update_data = request.form.get('data')
+    search_query = request.form.get('search_query')
+
+    if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+    else:
+        if os.path.isfile(f'tables/{tbl_name}.json'):
+            table = getDb(f'tables/{tbl_name}.json')
+            rows = table.getBy(ast.literal_eval(search_query))
+            table.update(ast.literal_eval(search_query), ast.literal_eval(update_data))
+            return {
+                'status': 'success',
+                'tbl_name': tbl_name,
+                'search_query': search_query,
+                'update_data': update_data,
+                'rows': len(rows)
+            }
+        else:
+            return jsonify({'status': 'error','message': 'Table not found'})
+
 @app.route('/search', methods=["POST"])
 def search():
     tbl_name = request.form.get('tbl_name')
@@ -109,28 +151,33 @@ def search():
     
     if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
         return jsonify({'status': 'error','message': 'Invalid username or password'})
-
-    if os.path.isfile(f'tables/{tbl_name}.json'):
-        table = getDb(f'tables/{tbl_name}.json')
-        if search_query == 'all':
-            data = table.getAll()
-        else:
-            data = table.getByQuery(search_query)
-        return jsonify({'status': 'success','tbl_name': tbl_name,'data': data})
     else:
-        return jsonify({'status': 'error','message': 'Table not found'})
+        if os.path.isfile(f'tables/{tbl_name}.json'):
+            table = getDb(f'tables/{tbl_name}.json')
+            if search_query == 'all':
+                data = table.getAll()
+                return jsonify({'status': 'success','tbl_name': tbl_name,'data': data, 'rows': len(data)})
+            else:
+                data = table.getByQuery(ast.literal_eval(search_query))
+                return jsonify({'status': 'success','tbl_name': tbl_name,'data': data, 'rows': len(data)})
+            
+        else:
+            return jsonify({'status': 'error','message': 'Table not found'})
     
 @app.route('/insert', methods=["POST"])
 def insert():
     tbl_name = request.form.get('tbl_name')
     insert_data = request.form.get('data')
-    
+
     if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
         return jsonify({'status': 'error','message': 'Invalid username or password'})
 
     if os.path.isfile(f'tables/{tbl_name}.json'):
         table = getDb(f'tables/{tbl_name}.json')
-        table.add(insert_data)
+        try:
+            table.add(ast.literal_eval(insert_data))
+        except Exception as e:
+            return jsonify({'status': 'error','message': str(e)})
         return jsonify({'status': 'success','tbl_name': tbl_name,'data': insert_data})
     else:
         return jsonify({'status': 'error','message': 'Table not found'})
@@ -160,6 +207,14 @@ def create():
     else:
         getDb(f'tables/{tbl_name}.json')
         return jsonify({'status':'success','tbl_name':tbl_name})
-    
+
+@app.route('/list', methods=["POST"])
+def list_tbls():
+    if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+
+    data = [x.replace('.json', '') for x in os.listdir('tables')]
+    return jsonify({'status':'success','data':data})
+
     
 app.run(host='0.0.0.0', port=3363, debug=debug)
