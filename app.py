@@ -11,11 +11,6 @@ import os
 import sys
 import re
 
-if '-d' in sys.argv:
-    debug = True
-else:
-    debug = False
-
 if os.path.isdir('tables') == False:
     os.mkdir('tables')
 if os.path.isdir('data') == False:
@@ -142,9 +137,9 @@ def update():
     else:
         if os.path.isfile(f'tables/{tbl_name}.json'):
             table = getDb(f'tables/{tbl_name}.json')
-            rows = table.getBy(ast.literal_eval(search_query))
+            rows = table.getByQuery(ast.literal_eval(search_query))
             try:
-                table.update(ast.literal_eval(search_query), ast.literal_eval(update_data))
+                table.updateByQuery(ast.literal_eval(search_query), ast.literal_eval(update_data))
             except pysondb.errors.db_errors.DataNotFoundError:
                 return jsonify({'status': 'error','message': 'Search query not found'})
             
@@ -231,4 +226,5 @@ def list_tbls():
     return jsonify({'status':'success','data':data})
 
     
-app.run(host='0.0.0.0', port=3363, debug=debug)
+if __name__ == '__main__':
+   app.run()
