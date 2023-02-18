@@ -3,6 +3,7 @@
 from pysondb import getDb
 from flask import Flask, request, jsonify
 from tabulate import tabulate
+import getpass
 import ast
 import pysondb
 import threading
@@ -14,6 +15,17 @@ if '-d' in sys.argv:
     debug = True
 else:
     debug = False
+
+if os.path.isdir('tables') == False:
+    os.mkdir('tables')
+if os.path.isdir('data') == False:
+    os.mkdir('data')
+if os.path.isfile('data/users.json') == False:
+    print('No users found, creating a new user...')
+    username = input('Enter a username: ')
+    password = getpass.getpass('Enter a password: ')
+    users_tbl = getDb('data/users.json')
+    users_tbl.add({'username': username, 'password': password})
 
 app = Flask(__name__)
 users_tbl = getDb('data/users.json')
