@@ -1,12 +1,10 @@
-# TODO - Create list command for post client
 # TODO - Add user encryption
-# TODO - Add user authentication
-# TODO - Add database encryption
 
 from pysondb import getDb
 from flask import Flask, request, jsonify
 from tabulate import tabulate
 import ast
+import pysondb
 import threading
 import os 
 import sys
@@ -133,14 +131,18 @@ def update():
         if os.path.isfile(f'tables/{tbl_name}.json'):
             table = getDb(f'tables/{tbl_name}.json')
             rows = table.getBy(ast.literal_eval(search_query))
-            table.update(ast.literal_eval(search_query), ast.literal_eval(update_data))
-            return {
+            try:
+                table.update(ast.literal_eval(search_query), ast.literal_eval(update_data))
+            except pysondb.errors.db_errors.DataNotFoundError:
+                return jsonify({'status': 'error','message': 'Search query not found'})
+            
+            return jsonify({
                 'status': 'success',
                 'tbl_name': tbl_name,
                 'search_query': search_query,
                 'update_data': update_data,
                 'rows': len(rows)
-            }
+            })
         else:
             return jsonify({'status': 'error','message': 'Table not found'})
 
@@ -168,7 +170,6 @@ def search():
 def insert():
     tbl_name = request.form.get('tbl_name')
     insert_data = request.form.get('data')
-
     if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
         return jsonify({'status': 'error','message': 'Invalid username or password'})
 
@@ -176,8 +177,9 @@ def insert():
         table = getDb(f'tables/{tbl_name}.json')
         try:
             table.add(ast.literal_eval(insert_data))
-        except Exception as e:
-            return jsonify({'status': 'error','message': str(e)})
+        except ValueError:
+            return jsonify({'status': 'error','message': 'Invalid data'})
+        
         return jsonify({'status': 'success','tbl_name': tbl_name,'data': insert_data})
     else:
         return jsonify({'status': 'error','message': 'Table not found'})
