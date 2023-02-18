@@ -126,6 +126,28 @@ console.start()
 def page_not_found(e):
     return jsonify({'status': 'error','message': 'Page not found'})
 
+@app.route('/remove', methods=["POST"])
+def remove():
+    tbl_name = request.form.get('tbl_name')
+    search_query = request.form.get('search_query')
+
+    if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+    else:
+        if os.path.isfile(f'tables/{tbl_name}.json'):
+            table = getDb(f'tables/{tbl_name}.json')
+            rows = table.getByQuery(ast.literal_eval(search_query))
+            if len(rows) == 0:
+                print(rows)
+                return jsonify({'status': 'error','message': 'No rows found'})
+            else:
+                for row in rows:
+                    table.deleteById(row['id'])
+                return jsonify({'status': 'success','message': 'Data removed, {} rows removed'.format(len(rows))})
+        else:
+            return jsonify({'status': 'error','message': 'Table not found'})
+
+
 @app.route('/update', methods=["POST"])
 def update():
     tbl_name = request.form.get('tbl_name')
