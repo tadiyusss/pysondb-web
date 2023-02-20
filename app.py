@@ -264,4 +264,4 @@ def list_tbls():
         return jsonify({'status': 'error','message': f"{type(e).__name__}: {str(e)}"})
     
 if __name__ == '__main__':
-   app.run(host='0.0.0.0', port=3363, debug=True)
+   app.run(host='0.0.0.0', port=3363)
