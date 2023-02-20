@@ -1,4 +1,4 @@
-# TODO - Add user encryption
+#!/usr/bin/python3
 
 from pysondb import getDb
 from flask import Flask, request, jsonify
