@@ -5,25 +5,267 @@ from flask import Flask, request, jsonify
 from tabulate import tabulate
 import getpass
 import ast
+import hashlib
 import pysondb
 import threading
 import os 
 import sys
 import re
+import random
+import string
 
+app = Flask(__name__)
+users_tbl = getDb('data/users.json')
+
+def random_string(length):
+    letters = string.ascii_lowercase
+    return ''.join(random.choice(letters) for i in range(length))
+
+def hash_password(password):
+    salt = random_string(32)
+    salted_password = password + salt
+    return {
+        'salt': salt,
+        'password': hashlib.sha256(salted_password.encode()).hexdigest()
+    }
+
+class UserHandler:
+    def deauthorize_user(self, username, table_name):
+        data = getDb('data/users.json').getByQuery({'username': username})
+        if len(data) == 0:
+            return {
+                'status': 'error',
+                'message': 'User not found'
+            }
+        if table_name not in data[0]['authorized_tbl']:
+            return {
+                'status': 'error',
+                'message': f'User not authorized to table {table_name}'
+            }
+        data[0]['authorized_tbl'].remove(table_name)
+        getDb('data/users.json').updateById(data[0]['id'], {'authorized_tbl': data[0]['authorized_tbl']})
+        return {
+            'status': 'success',
+            'message': f'User deauthorized from table {table_name}'
+        }
+    def authorize_user(self, username, table_name):
+        data = getDb('data/users.json').getByQuery({'username': username})
+        if len(data) == 0:
+            return {
+                'status': 'error',
+                'message': 'User not found'
+            }
+        if table_name not in TableHandler().list_tables():
+            return {
+                'status': 'error',
+                'message': 'Table not found'
+            }
+        if table_name in data[0]['authorized_tbl']:
+            return {
+                'status': 'error',
+                'message': f'User already authorized to table {table_name}'
+            }
+        data[0]['authorized_tbl'].append(table_name)
+        getDb('data/users.json').updateById(data[0]['id'], {'authorized_tbl': data[0]['authorized_tbl']})
+        return {
+            'status': 'success',
+            'message': f'User authorized to table {table_name}'
+        }
+    
+    def check_user_validity(self, username, password):
+        data = getDb('data/users.json').getByQuery({'username': username})
+        if len(data) == 0:
+            return False
+        salt = data[0]['salt']
+        hashed_password = data[0]['password']
+        salted_password = password + salt
+        return hashlib.sha256(salted_password.encode()).hexdigest() == hashed_password
+    
+    def check_table_authorization(self, table, username):
+        data = getDb('data/users.json').getByQuery({'username': username})
+        if len(data) == 0:
+            return False
+        if table not in data[0]['authorized_tbl']:
+            return False
+        return True
+    
+    def create_user(self, username, password):
+        hashed_password = hash_password(password)
+        if len(getDb('data/users.json').getByQuery({'username': username})) != 0:
+            return {
+                'status': 'error',
+                'message': 'Username already exists'
+            }
+        getDb('data/users.json').add({'username': username, 'password': hashed_password['password'], 'salt': hashed_password['salt'], 'authorized_tbl': []})
+        return {
+            'status': 'success',
+            'message': 'User created'
+        }
+    
+    def delete_user(self, username):
+        if len(getDb('data/users.json').getByQuery({'username': username})) == 0:
+            return {
+                'status': 'error',
+                'message': 'User not found'
+            }
+        getDb('data/users.json').deleteById(getDb('data/users.json').getByQuery({'username': username})[0]['id'])
+        return {
+            'status': 'success',
+            'message': 'User deleted'
+        }
+
+class TableHandler:
+    def list_tables(self):
+        data = os.listdir('tables')
+        files = []
+        for file in data:
+            if file.endswith('.json'):
+                files.append(file[:-5])  
+        return files
+    
+    def create_table(self, table_name):
+        if table_name in self.list_tables():
+            return {
+                'status': 'error',
+                'message': 'Table already exists'
+            }
+        try:
+            getDb(f'tables/{table_name}.json')
+        except OSError:
+            return {
+                'status': 'error',
+                'message': 'Invalid table name'
+            }
+        return {
+            'status':'success',
+            'message': f'Table {table_name} created',
+        }
+    
+    def delete_table(self, table_name):
+        if table_name not in self.list_tables():
+            return {
+                'status': 'error',
+                'message': 'Table not found'
+            }
+        os.remove(f'tables/{table_name}.json')
+        return {
+            'status':'success',
+            'message': f'Table {table_name} deleted',
+        }
+    
+    def insert_data(self, table_name, data):
+        if table_name not in self.list_tables():
+            return {
+                'status': 'error',
+                'message': 'Table not found'
+            }
+        table = getDb(f'tables/{table_name}.json')
+        try:
+            table.add(data)
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': 'Invalid data type'
+            }
+        
+        return {
+            'status':'success',
+            'message': f'Data inserted to {table_name}'
+        }
+    
+    def search_data(self, table_name, search_query):
+        if table_name not in self.list_tables():
+            return {
+                'status': 'error',
+                'message': 'Table not found'
+            }
+        table = getDb(f'tables/{table_name}.json')
+        if type(search_query) != dict and search_query != '*' and search_query != 'all':
+            return {
+                'status': 'error',
+                'message': 'Search query must be a dictionary'
+            }
+        if search_query == '*' or search_query == 'all':
+            data = table.getAll()
+        else:
+            data = table.getByQuery(search_query)
+        return {
+            'status': 'success',
+            'message': f'{len(data)} rows found',
+            'rows': len(data),
+            'data': data
+        }
+
+    def delete_data(self, table_name, search_query):
+        if table_name not in self.list_tables():
+            return {
+                'status': 'error',
+                'message': 'Table not found'
+            }
+        if type(search_query) != dict:
+            return {
+                'status': 'error',
+                'message': 'Search query must be a dictionary'
+            }
+        data = self.search_data(table_name, search_query)
+        if data['rows'] == 0:
+            return {
+                'status': 'error',
+                'message': 'No rows found'
+            }
+        table = getDb(f'tables/{table_name}.json')
+        for row in data['data']:
+            table.deleteById(row['id'])
+        return {
+            'status': 'success',
+            'message': f'{data["rows"]} rows deleted from {table_name}',
+            'rows': data['rows']
+        }
+    def update_data(self, table_name, search_query, update_data):
+        if table_name not in self.list_tables():
+            return {
+                'status': 'error',
+                'message': 'Table not found'
+            }
+        if type(search_query) != dict:
+            return {
+                'status': 'error',
+                'message': 'Search query must be a dictionary'
+            }
+        if type(update_data) != dict:
+            return {
+                'status': 'error',
+                'message': 'Update data must be a dictionary'
+            }
+        data = self.search_data(table_name, search_query)
+        if data['rows'] == 0:
+            return {
+                'status': 'error',
+                'message': 'No rows found'
+            }
+        table = getDb(f'tables/{table_name}.json')
+        try:
+            table.updateByQuery(search_query, update_data)
+        except pysondb.errors.db_errors.DataNotFoundError:
+            return {
+                'status': 'error',
+                'message': 'Search query not found'
+            }
+        return {
+            'status': 'success',
+            'message': f'{data["rows"]} rows updated from {table_name}',
+            'rows': data['rows']
+        }
+    
 if os.path.isdir('tables') == False:
     os.mkdir('tables')
 if os.path.isdir('data') == False:
     os.mkdir('data')
-if os.path.isfile('data/users.json') == False:
+if os.path.isfile('data/users.json') == False or users_tbl.getAll() == []:
     print('No users found, creating a new user...')
     username = input('Enter a username: ')
     password = getpass.getpass('Enter a password: ')
-    users_tbl = getDb('data/users.json')
-    users_tbl.add({'username': username, 'password': password})
-
-app = Flask(__name__)
-users_tbl = getDb('data/users.json')
+    print(UserHandler().create_user(username, password)['message'])
 
 def console():
     while True:
@@ -42,27 +284,26 @@ adduser - <username> <password> - add a user to the database
 deluser - <username> - delete a user from the database
 update - <tbl_name> <search_query> <update_data> - update data in a table
 clear - clear the console
-''')        
+authorize - <tbl_name> <username> - authorize a user to a table
+deauthorize - <tbl_name> <username> - deauthorize a user from a table                   
+                ''')      
+            elif splitted_command[0] == 'deauthorize':
+                tbl_name = splitted_command[1]
+                username = splitted_command[2]
+                print(UserHandler().deauthorize_user(username, tbl_name))
+            elif splitted_command[0] == 'authorize':
+                tbl_name = splitted_command[1]
+                username = splitted_command[2]
+                print(UserHandler().authorize_user(username, tbl_name))
             elif splitted_command[0] == 'update':
                 tbl_name = splitted_command[1]
                 search_query = re.findall(r'{.*?}', command)[0]
                 update_data = re.findall(r'{.*?}', command)[1]
-                if os.path.isfile(f'tables/{tbl_name}.json'):
-                    table = getDb(f'tables/{tbl_name}.json')
-                    rows = table.getByQuery(ast.literal_eval(search_query))
-                    table.updateByQuery(ast.literal_eval(search_query), ast.literal_eval(update_data))
-                    print('Data updated, {} rows updated'.format(len(rows)))
-                else:
-                    print('Table not found')
+                print(TableHandler().update_data(tbl_name, ast.literal_eval(search_query), ast.literal_eval(update_data)))
             elif splitted_command[0] == 'insert':
                 tbl_name = splitted_command[1]
                 insert_data = re.findall(r'{.*?}', command)[0]
-                if os.path.isfile(f'tables/{tbl_name}.json'):
-                    table = getDb(f'tables/{tbl_name}.json')
-                    table.add(ast.literal_eval(insert_data))
-                    print('Data inserted')
-                else:
-                    print('Table not found')
+                print(TableHandler().insert_data(tbl_name, ast.literal_eval(insert_data)))
 
             elif command == 'clear':
                 if os.name == 'nt':
@@ -70,49 +311,32 @@ clear - clear the console
                 else:
                     os.system('clear')
             elif splitted_command[0] == 'create':
-                if os.path.isfile(f'tables/{splitted_command[1]}.json'):
-                    print('Table already exists')
-                else:
-                    getDb(f'tables/{splitted_command[1]}.json')
-                    print('Table created')
+                table_name = splitted_command[1]
+                print(TableHandler().create_table(table_name))
+
             elif splitted_command[0] == 'drop':
-                if os.path.isfile(f'tables/{splitted_command[1]}.json'):
-                    os.remove(f'tables/{splitted_command[1]}.json')
-                    print('Table dropped')
-                else:
-                    print('Table not found')
+                table_name = splitted_command[1]
+                print(TableHandler().delete_table(table_name))
+
             elif splitted_command[0] == 'adduser':
                 username = splitted_command[1]
                 password = splitted_command[2]
-                if len(users_tbl.getByQuery({'username': username})) != 0:
-                    print('Username already exists')
-                    continue
-                users_tbl.add({'username': username, 'password': password})
-                print('User added')
+                print(UserHandler().create_user(username, password))
+
             elif splitted_command[0] == 'deluser':
                 username = splitted_command[1]
-                if len(users_tbl.getByQuery({'username': username})) != 0:
-                    users_tbl.deleteById(users_tbl.getByQuery({'username': username})[0]['id'])
-                else:
-                    print('User not found')
+                print(UserHandler().delete_user(username))
+
             elif splitted_command[0] == 'list':
-                data = [x.replace('.json', '') for x in os.listdir('tables')]
-                table = []
-                for x in data:
-                    table.append([x])
-                print(tabulate(table , headers=['Tables'], tablefmt='psql'))
+                print(tabulate(TableHandler().list_tables() , headers=['Tables'], tablefmt='psql'))
             elif splitted_command[0] == 'search':
                 tbl_name = splitted_command[1]
                 search_query = splitted_command[2]
-                if os.path.isfile(f'tables/{tbl_name}.json'):
-                    table = getDb(f'tables/{tbl_name}.json')
-                    if search_query == '*':
-                        data = table.getAll()
-                    else:
-                        data = table.getByQuery(search_query)
-                    print(tabulate(data, headers='keys', tablefmt='psql'))
-                else:
-                    print('Table not found')
+                if search_query == '*':
+                    search_query = 'all'
+                else: 
+                    search_query = ast.literal_eval(search_query)
+                print(TableHandler().search_data(tbl_name, search_query))
             else:
                 print('Invalid command. Type "help" to see all commands')
         except IndexError:
@@ -128,140 +352,85 @@ def page_not_found(e):
 
 @app.route('/remove', methods=["POST"])
 def remove():
-    try:
-        tbl_name = request.form.get('tbl_name')
-        search_query = request.form.get('search_query')
-
-        if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
-            return jsonify({'status': 'error','message': 'Invalid username or password'})
-        else:
-            if os.path.isfile(f'tables/{tbl_name}.json'):
-                table = getDb(f'tables/{tbl_name}.json')
-                rows = table.getByQuery(ast.literal_eval(search_query))
-                if len(rows) == 0:
-                    print(rows)
-                    return jsonify({'status': 'error','message': 'No rows found'})
-                else:
-                    for row in rows:
-                        table.deleteById(row['id'])
-                    return jsonify({'status': 'success','message': 'Data removed', 'data': len(rows)})
-            else:
-                return jsonify({'status': 'error','message': 'Table not found'})
-    except Exception as e:
-        return jsonify({'status': 'error','message': f"{type(e).__name__}: {str(e)}"})
+    required = ['tbl_name', 'search_query', 'username', 'password']
+    for field in required:
+        if field not in request.form:
+            return jsonify({'status': 'error','message': f"Missing field {field}"})
+    if UserHandler().check_user_validity(request.form.get('username'), request.form.get('password')) == False:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+    if UserHandler().check_table_authorization(request.form.get('username'), request.form.get('tbl_name')) == False:
+        return jsonify({'status': 'error','message': 'You are not authorized to this table'})
+    return TableHandler().delete_data(request.form.get('tbl_name'), ast.literal_eval(request.form.get('search_query')))
 
 @app.route('/update', methods=["POST"])
 def update():
-    try:
-        tbl_name = request.form.get('tbl_name')
-        update_data = request.form.get('data')
-        search_query = request.form.get('search_query')
-
-        if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
-            return jsonify({'status': 'error','message': 'Invalid username or password'})
-            
-        if os.path.isfile(f'tables/{tbl_name}.json'):
-            table = getDb(f'tables/{tbl_name}.json')
-            rows = table.getByQuery(ast.literal_eval(search_query))
-            try:
-                table.updateByQuery(ast.literal_eval(search_query), ast.literal_eval(update_data))
-            except pysondb.errors.db_errors.DataNotFoundError:
-                return jsonify({'status': 'error','message': 'Search query not found'})
-            
-            return jsonify({'status': 'success','tbl_name': tbl_name,'search_query': search_query,'update_data': update_data,'rows': len(rows)})
-        else:
-            return jsonify({'status': 'error','message': 'Table not found'})
-    except Exception as e:
-        return jsonify({'status': 'error','message': f"{type(e).__name__}: {str(e)}"})
+    required = ['tbl_name', 'data', 'search_query', 'username', 'password']
+    for field in required:
+        if field not in request.form:
+            return jsonify({'status': 'error','message': f"Missing field {field}"})
+    if UserHandler().check_user_validity(request.form.get('username'), request.form.get('password')) == False:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+    if UserHandler().check_table_authorization(request.form.get('tbl_name'), request.form.get('username')) == False:
+        return jsonify({'status': 'error','message': 'You are not authorized to this table'})
+    return TableHandler().update_data(request.form.get('tbl_name'), ast.literal_eval(request.form.get('search_query')), ast.literal_eval(request.form.get('data')))
+    
 @app.route('/search', methods=["POST"])
 def search():
-    try:
-        tbl_name = request.form.get('tbl_name')
-        search_query = request.form.get('search_query')
-        
-        if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
-            return jsonify({'status': 'error','message': 'Invalid username or password'})
-        if search_query == '':
-            return jsonify({'status': 'error','message': 'Search query cannot be empty'})
-        else:
-            if os.path.isfile(f'tables/{tbl_name}.json'):
-                table = getDb(f'tables/{tbl_name}.json')
-                if search_query == '*':
-                    data = table.getAll()
-                    return jsonify({'status': 'success','tbl_name': tbl_name,'data': data, 'rows': len(data)}) 
-                else:
-                    data = table.getByQuery(ast.literal_eval(search_query))
-                    return jsonify({'status': 'success','tbl_name': tbl_name,'data': data, 'rows': len(data)})
-                
-            else:
-                return jsonify({'status': 'error','message': 'Table not found'})
-    except Exception as e:
-        return jsonify({'status': 'error','message': f"{type(e).__name__}: {str(e)}"})
+    required = ['tbl_name', 'search_query', 'username', 'password']
+    for field in required:
+        if field not in request.form:
+            return jsonify({'status': 'error','message': f"Missing field {field}"})
+    if UserHandler().check_user_validity(request.form.get('username'), request.form.get('password')) == False:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+    if UserHandler().check_table_authorization(request.form.get('tbl_name'), request.form.get('username')) == False:
+        return jsonify({'status': 'error','message': 'You are not authorized to this table'})
+    if request.form.get('search_query') == '*' or request.form.get('search_query') == 'all':
+        return TableHandler().search_data(request.form.get('tbl_name'), request.form.get('search_query'))
+    return TableHandler().search_data(request.form.get('tbl_name'), ast.literal_eval(request.form.get('search_query')))
+
 @app.route('/insert', methods=["POST"])
 def insert():
-    try:
-        tbl_name = request.form.get('tbl_name')
-        insert_data = request.form.get('data')
-        if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
-            return jsonify({'status': 'error','message': 'Invalid username or password'})
-
-        if os.path.isfile(f'tables/{tbl_name}.json'):
-            table = getDb(f'tables/{tbl_name}.json')
-            table.add(ast.literal_eval(insert_data))
-            return jsonify({'status': 'success','tbl_name': tbl_name,'data': insert_data})
-        else:
-            return jsonify({'status': 'error','message': 'Table not found'})
-    except Exception as e:
-        return jsonify({'status': 'error','message': f"{type(e).__name__}: {str(e)}"})
+    required = ['tbl_name', 'data', 'username', 'password']
+    for field in required:
+        if field not in request.form:
+            return jsonify({'status': 'error','message': f"Missing field {field}"})
+    if UserHandler().check_user_validity(request.form.get('username'), request.form.get('password')) == False:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+    if UserHandler().check_table_authorization(request.form.get('tbl_name'), request.form.get('username')) == False:
+        return jsonify({'status': 'error','message': 'You are not authorized to this table'})
+    return TableHandler().insert_data(request.form.get('tbl_name'), ast.literal_eval(request.form.get('data')))
     
 @app.route('/drop', methods=["POST"])
 def drop():
-    try:
-        tbl_name = request.form.get('tbl_name')
-        
-        if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
-            return jsonify({'status': 'error','message': 'Invalid username or password'})
-
-        if os.path.isfile(f'tables/{tbl_name}.json'):
-            os.remove(f'tables/{tbl_name}.json')
-            return jsonify({'status':'success','tbl_name':tbl_name})
-        else:
-            return jsonify({'status':'error','message':'Table not found'})
-    except Exception as e:
-        return jsonify({'status': 'error','message': f"{type(e).__name__}: {str(e)}"})
+    required = ['tbl_name', 'username', 'password']
+    for field in required:
+        if field not in request.form:
+            return jsonify({'status': 'error','message': f"Missing field {field}"})
+    if UserHandler().check_user_validity(request.form.get('username'), request.form.get('password')) == False:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+    if UserHandler().check_table_authorization(request.form.get('tbl_name'), request.form.get('username')) == False:
+        return jsonify({'status': 'error','message': 'You are not authorized to this table'})
+    return TableHandler().delete_table(request.form.get('tbl_name'))
+    
 @app.route('/create', methods=["POST"])
 def create():
-    try:
-        tbl_name = request.form.get('tbl_name')
-        
-        if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
-            return jsonify({'status': 'error','message': 'Invalid username or password'})
-
-        if os.path.isfile(f'tables/{tbl_name}.json'):
-            return jsonify({'status': 'error','message': 'Table already exists'})
-        else:
-            try:
-                getDb(f'tables/{tbl_name}.json')
-            except OSError:
-                return jsonify({'status': 'error','message': 'Invalid table name'})
-            return jsonify({'status':'success','tbl_name':tbl_name})
-    except Exception as e:
-        return jsonify({'status': 'error','message': f"{type(e).__name__}: {str(e)}"})
+    required = ['tbl_name', 'username', 'password']
+    for field in required:
+        if field not in request.form:
+            return jsonify({'status': 'error','message': f"Missing field {field}"})
+    if UserHandler().check_user_validity(request.form.get('username'), request.form.get('password')) == False:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+    return TableHandler().create_table(request.form.get('tbl_name'))
     
 @app.route('/list', methods=["POST"])
 def list_tbls():
-    try:
-        if len(users_tbl.getByQuery({'username': request.form.get('username'), 'password': request.form.get('password')})) == 0:
-            return jsonify({'status': 'error','message': 'Invalid username or password'})
-        else:
-            data = os.listdir('tables')
-            files = []
-            for file in data:
-                if file.endswith('.json'):
-                    files.append(file[:-5])  
-        return jsonify({'status':'success','data':files, 'tables_count': len(files)})
-    except Exception as e:
-        return jsonify({'status': 'error','message': f"{type(e).__name__}: {str(e)}"})
+    required = ['username', 'password']
+    for field in required:
+        if field not in request.form:
+            return jsonify({'status': 'error','message': f"Missing field {field}"})
+    if UserHandler().check_user_validity(request.form.get('username'), request.form.get('password')) == False:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+    return jsonify({'status': 'success','message': 'Tables listed', 'tables': TableHandler().list_tables()})
     
 if __name__ == '__main__':
    app.run(host='0.0.0.0', port=3363)
