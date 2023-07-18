@@ -14,9 +14,6 @@ import re
 import random
 import string
 
-app = Flask(__name__)
-users_tbl = getDb('data/users.json')
-
 def random_string(length):
     letters = string.ascii_lowercase
     return ''.join(random.choice(letters) for i in range(length))
@@ -28,6 +25,19 @@ def hash_password(password):
         'salt': salt,
         'password': hashlib.sha256(salted_password.encode()).hexdigest()
     }
+
+if os.path.isdir('tables') == False:
+    os.mkdir('tables')
+if os.path.isdir('data') == False:
+    os.mkdir('data')
+if os.path.isfile('data/users.json') == False:
+    print('No users found, creating a new user...')
+    username = input('Enter a username: ')
+    password = getpass.getpass('Enter a password: ')
+    hashed_password = hash_password(password)
+    getDb('data/users.json').add({'username': username, 'password': hashed_password['password'], 'salt': hashed_password['salt'], 'authorized_tbl': []})
+
+app = Flask(__name__)
 
 class UserHandler:
     def deauthorize_user(self, username, table_name):
@@ -221,6 +231,33 @@ class TableHandler:
             'message': f'{data["rows"]} rows deleted from {table_name}',
             'rows': data['rows']
         }
+    
+    def delete_data(self, table_name, search_query):
+        if table_name not in self.list_tables():
+            return {
+                'status': 'error',
+                'message': 'Table not found'
+            }
+        if type(search_query) != dict:
+            return {
+                'status': 'error',
+                'message': 'Search query must be a dictionary'
+            }
+        data = self.search_data(table_name, search_query)
+        if data['rows'] == 0:
+            return {
+                'status': 'error',
+                'message': 'No rows found'
+            }
+        table = getDb(f'tables/{table_name}.json')
+        for row in data['data']:
+            table.deleteById(row['id'])
+        return {
+            'status': 'success',
+            'message': f'{data["rows"]} rows deleted from {table_name}',
+            'rows': data['rows']
+        }
+    
     def update_data(self, table_name, search_query, update_data):
         if table_name not in self.list_tables():
             return {
@@ -256,16 +293,8 @@ class TableHandler:
             'message': f'{data["rows"]} rows updated from {table_name}',
             'rows': data['rows']
         }
-    
-if os.path.isdir('tables') == False:
-    os.mkdir('tables')
-if os.path.isdir('data') == False:
-    os.mkdir('data')
-if os.path.isfile('data/users.json') == False or users_tbl.getAll() == []:
-    print('No users found, creating a new user...')
-    username = input('Enter a username: ')
-    password = getpass.getpass('Enter a password: ')
-    print(UserHandler().create_user(username, password)['message'])
+
+
 
 def console():
     while True:
@@ -278,15 +307,20 @@ help - show this message
 list - list all tables
 create - <tbl_name> - create a table
 drop - <tbl_name> - drop a table
-insert - <tbl_name> <data> - insert data to a table
-search - <tbl_name> <search_query> - search data in a table (use "*" to get all data)
+insert - <tbl_name> <data:json> - insert data to a table
+delete - <tbl_name> <search_query:json> - delete data from a table                      
+search - <tbl_name> <search_query:json> - search data in a table (use "*" to get all data)
 adduser - <username> <password> - add a user to the database
 deluser - <username> - delete a user from the database
-update - <tbl_name> <search_query> <update_data> - update data in a table
+update - <tbl_name> <search_query:json> <update_data:json> - update data in a table
 clear - clear the console
 authorize - <tbl_name> <username> - authorize a user to a table
 deauthorize - <tbl_name> <username> - deauthorize a user from a table                   
                 ''')      
+            elif splitted_command[0] == 'delete':
+                tbl_name = splitted_command[1]
+                search_query = re.findall(r'{.*?}', command)[0]
+                print(TableHandler().delete_data(tbl_name, ast.literal_eval(search_query)))
             elif splitted_command[0] == 'deauthorize':
                 tbl_name = splitted_command[1]
                 username = splitted_command[2]
@@ -328,7 +362,12 @@ deauthorize - <tbl_name> <username> - deauthorize a user from a table
                 print(UserHandler().delete_user(username))
 
             elif splitted_command[0] == 'list':
-                print(tabulate(TableHandler().list_tables() , headers=['Tables'], tablefmt='psql'))
+                data = TableHandler().list_tables()
+                tables_list = []
+                for table in data:
+                    tables_list.append([table])
+                print(data)
+                print(tabulate(tables_list, headers=['Tables'], tablefmt='psql'))
             elif splitted_command[0] == 'search':
                 tbl_name = splitted_command[1]
                 search_query = splitted_command[2]
@@ -336,7 +375,10 @@ deauthorize - <tbl_name> <username> - deauthorize a user from a table
                     search_query = 'all'
                 else: 
                     search_query = ast.literal_eval(search_query)
-                print(TableHandler().search_data(tbl_name, search_query))
+                data = TableHandler().search_data(tbl_name, search_query)
+                print(data)
+                print(tabulate(data['data'], headers='keys', tablefmt='psql'))
+                
             else:
                 print('Invalid command. Type "help" to see all commands')
         except IndexError:
@@ -349,6 +391,10 @@ console.start()
 @app.errorhandler(404)
 def page_not_found(e):
     return jsonify({'status': 'error','message': 'Page not found'})
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    return jsonify({'status': 'error','message': 'Invalid request or missing fields'})
 
 @app.route('/remove', methods=["POST"])
 def remove():
@@ -400,6 +446,22 @@ def insert():
         return jsonify({'status': 'error','message': 'You are not authorized to this table'})
     return TableHandler().insert_data(request.form.get('tbl_name'), ast.literal_eval(request.form.get('data')))
     
+@app.route('/delete', methods=["POST"])
+def delete():
+    required = ['username', 'password', 'tbl_name', 'search_query']
+    for field in required:
+        if field not in request.form:
+            return jsonify({'status': 'error','message': f"Missing field {field}"})
+    if UserHandler().check_user_validity(request.form.get('username'), request.form.get('password')) == False:
+        return jsonify({'status': 'error','message': 'Invalid username or password'})
+    if UserHandler().check_table_authorization(request.form.get('tbl_name'), request.form.get('username')) == False:
+        return jsonify({'status': 'error','message': 'You are not authorized to this table'})
+    try:
+        query = ast.literal_eval(request.form.get('search_query'))
+    except ValueError:
+        return jsonify({'status': 'error','message': 'Search query must be a dictionary'})
+    return TableHandler().delete_data(request.form.get('tbl_name'), query)
+
 @app.route('/drop', methods=["POST"])
 def drop():
     required = ['tbl_name', 'username', 'password']
