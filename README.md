@@ -37,6 +37,7 @@ list - list all tables
 create - <tbl_name> - create a table
 drop - <tbl_name> - drop a table
 insert - <tbl_name> <data> - insert data to a table
+delete - <tbl_name> <search_query> - delete row to a table
 search - <tbl_name> <search_query> - search data in a table (use "*" to get all data)
 adduser - <username> <password> - add a user to the database
 deluser - <username> - delete a user from the database
@@ -54,10 +55,10 @@ insert(tbl_name, insert_data)
 >>> {'data': "{'name': 'test'}", 'status': 'success', 'tbl_name': 'test'}
 ```
 
-- Remove
-Remove data from table
+- Delete
+Delete data from table
 ```
-remove(tbl_name, search_query)
+delete(tbl_name, search_query)
 >>> {'data': 1, 'message': 'Data removed', 'status': 'success'}
 ```
 
