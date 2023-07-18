@@ -25,7 +25,7 @@ cd pysondb-client
 mv pysonclient.py /path/to/project
 ```
 
-After moving the client.py file you can now import it to your projection
+After moving the client.py file you can now import it to your project
 
 ```
 import pysonclient
@@ -36,62 +36,63 @@ help - show this message
 list - list all tables
 create - <tbl_name> - create a table
 drop - <tbl_name> - drop a table
-insert - <tbl_name> <data> - insert data to a table
-delete - <tbl_name> <search_query> - delete row to a table
-search - <tbl_name> <search_query> - search data in a table (use "*" to get all data)
+insert - <tbl_name> <data:json> - insert data to a table
+delete - <tbl_name> <search_query:json> - delete data from a table                      
+search - <tbl_name> <search_query:json> - search data in a table (use "*" to get all data)
 adduser - <username> <password> - add a user to the database
 deluser - <username> - delete a user from the database
-update - <tbl_name> <search_query> <update_data> - update data in a table
+update - <tbl_name> <search_query:json> <update_data:json> - update data in a table
 clear - clear the console
+authorize - <tbl_name> <username> - authorize a user to a table
+deauthorize - <tbl_name> <username> - deauthorize a user from a table         
 ```
 
 ## Client Usage
 
+- Delete 
+
+```
+delete(tbl_name, search_query)
+>>> {'status': 'success', 'message': 'x rows deleted from x', 'rows': x}
+```
 
 - Insert
-Insert data to table
+
 ```
 insert(tbl_name, insert_data)
 >>> {'data': "{'name': 'test'}", 'status': 'success', 'tbl_name': 'test'}
 ```
 
-- Delete
-Delete data from table
-```
-delete(tbl_name, search_query)
->>> {'data': 1, 'message': 'Data removed', 'status': 'success'}
-```
-
 - Update
-Update data from table
+
 ```
 update(tbl_name, search_query, update_data)
 >>> {'rows': 1, 'search_query': "{'name': 'test'}", 'status': 'success', 'tbl_name': 'test', 'update_data': "{'name': 'test2'}"}
 ```
 
 - Search
-Search data on table
+
 ```
 search(tbl_name, search_query)
 >>> {'data': [{'id': 167163754919151945, 'name': 'test'}], 'rows': 1, 'status': 'success', 'tbl_name': 'test'}
 ```
 
 - Drop
-Drop a table
+
 ```
 drop(tbl_name)
 >>> {'status': 'success', 'tbl_name': 'tbl_users'}
 ```
 
 - Create
-Create a table
+
 ```
 create(tbl_name)
 >>> {'status': 'success', 'tbl_name': 'tbl_users'}
 ```
 
 - List
-List all available tables
+
 ```
 list_tbl()
 >>> {'data': ['test'], 'status': 'success', 'tables_count': 1}
